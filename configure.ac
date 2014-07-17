@@ -249,6 +249,20 @@ AM_COND_IF([ENABLE_SECCOMP],
 		])
 	])
 
+# criu
+AC_ARG_ENABLE([criu],
+	[AC_HELP_STRING([--enable-criu], [enable checkpoint/restore support [default=auto]])],
+	[], [enable_criu=auto])
+
+if test "x$enable_criu" = "xauto" ; then
+	AC_CHECK_LIB([criu],[criu_init_opts],[enable_criu=yes],[enable_criu=no])
+fi
+AM_CONDITIONAL([ENABLE_CRIU], [test "x$enable_criu" = "xyes"])
+AM_COND_IF([ENABLE_CRIU], [PKG_CHECK_MODULES([CRIU], [criu])])
+if test "x$enable_criu" = "xyes" ; then
+	AC_DEFINE([HAVE_CRIU], 1, [Have criu])
+fi
+
 # cgmanager
 AC_ARG_ENABLE([cgmanager],
 	[AC_HELP_STRING([--enable-cgmanager], [enable cgmanager support [default=auto]])],

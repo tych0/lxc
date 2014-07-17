@@ -770,6 +770,25 @@ struct lxc_container {
 	 * \return \c true on success, else \c false.
 	 */
 	bool (*remove_device_node)(struct lxc_container *c, const char *src_path, const char *dest_path);
+
+	/*!
+	 * \brief Checkpoint a container.
+	 *
+	 * \param c Container.
+	 *
+	 * \return \c 0 on success, \c <0 on failure (see criu_dump in criu/criu.h for details).
+	 * present at compile time.
+	 */
+	int (*checkpoint)(struct lxc_container *c, char *service_address, char *directory);
+
+	/*!
+	 * \brief Restore a container from a checkpoint.
+	 *
+	 * \param c Container.
+	 *
+	 * \return \c 0 on success \c <0 on failure (see criu_
+	 */
+	int (*restore)(struct lxc_container *c, char *service_address, char *directory);
 };
 
 /*!

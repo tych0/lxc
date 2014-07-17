@@ -62,6 +62,10 @@
 #include <../include/ifaddrs.h>
 #endif
 
+#if HAVE_CRIU
+#include <criu/criu.h>
+#endif
+
 #define MAX_BUFFER 4096
 
 #define NOT_SUPPORTED_ERROR "the requested function %s is not currently supported with unprivileged containers"
@@ -3454,6 +3458,263 @@ static bool lxcapi_remove_device_node(struct lxc_container *c, const char *src_p
 	return add_remove_device_node(c, src_path, dest_path, false);
 }
 
+#if HAVE_CRIU
+/* Iterate over every bridge/veth pair in a criu dump directory. */
+static int for_each_if_criu(char *directory, void *m, int (*cb)(void *m, char *bridge, char *veth))
+{
+	int netnr;
+
+	for (netnr = 0; ;netnr++) {
+		FILE *f;
+		char path[PATH_MAX], veth[128], bridge[128];
+
+		sprintf(path, "%s/veth%d", directory, netnr);
+		f = fopen(path, "r");
+		if (!f)
+			return -1;
+
+		if (fscanf(f, "%128s", veth) <= 0) {
+			fclose(f);
+			return -1;
+		}
+		fclose(f);
+
+		sprintf(path, "%s/bridge%d", directory, netnr);
+		f = fopen(path, "r");
+		if (!f)
+			return -1;
+
+		if (fscanf(f, "%128s", bridge) <= 0) {
+			fclose(f);
+			return -1;
+		}
+		fclose(f);
+
+		if (cb(m, bridge, veth)) {
+			return -1;
+		}
+	}
+
+	return 0;
+}
+
+static int brctl(void *action, char *bridge, char *veth)
+{
+	char cmd[1024];
+	sprintf(cmd, "brctl %s %s %s", (char *)action, bridge, veth);
+	return system(cmd);
+}
+
+static int restore_unlock(void *unused, char *bridge, char *veth)
+{
+	char cmd[1024];
+
+	sprintf(cmd, "ip link set up dev %s", veth);
+	if (system(cmd))
+		return -1;
+
+	sprintf(cmd, "brctl addif %s %s", bridge, veth);
+	if (system(cmd))
+		return -1;
+
+	return 0;
+}
+
+/* Used to pass information to criu_net_callback. */
+static char *current_criu_dir;
+static bool is_dump;
+
+static int criu_net_callback(char *action, criu_notify_arg_t na)
+{
+	if (is_dump) {
+		if (strcmp(action, "network-lock")) {
+			for_each_if_criu(current_criu_dir, "addif", brctl);
+		} else if (strcmp(action, "network-unlock")) {
+			for_each_if_criu(current_criu_dir, "delif", brctl);
+		}
+	} else {
+		if (strcmp(action, "network-unlock")) {
+			for_each_if_criu(current_criu_dir, NULL, restore_unlock);
+		}
+	}
+
+	return 0;
+}
+#endif
+
+static int lxcapi_checkpoint(struct lxc_container *c, char *service_address, char *directory)
+{
+#if HAVE_CRIU
+	int images_dir, netnr, ret = 0;
+	struct lxc_list *it;
+
+	/* We only know how to restore containers with veth networks. */
+	lxc_list_for_each(it, &c->lxc_conf->network) {
+		struct lxc_netdev *n = it->elem;
+		if (n->type != LXC_NET_VETH)
+			return -1;
+	}
+
+	criu_set_service_address(service_address);
+
+	if (criu_init_opts() < 0)
+		return -1;
+
+	if (mkdir(directory, 0700) < 0 && errno != EEXIST)
+		return -1;
+
+	images_dir = open(directory, O_DIRECTORY);
+	if (images_dir < 0)
+		return -1;
+	criu_set_images_dir_fd(images_dir);
+
+	criu_set_pid(c->init_pid(c));
+
+	/* TODO: is leave_running always true? */
+	criu_set_leave_running(false);
+	criu_set_tcp_established(true);
+	criu_set_file_locks(true);
+
+	criu_set_notify_cb(criu_net_callback);
+
+	criu_set_ns_flags(CLONE_NEWNS | CLONE_NEWPID | CLONE_NEWNET);
+
+	for (netnr = 0; ; netnr++) {
+		char *veth, *bridge, veth_path[PATH_MAX];
+
+		sprintf(veth_path, "lxc.network.%d.veth.pair", netnr);
+		veth = c->get_running_config_item(c, veth_path);
+		if (!veth)
+			break;
+
+		sprintf(veth_path, "lxc.network.%d.link", netnr);
+		bridge = c->get_running_config_item(c, veth_path);
+		if (!bridge) {
+			free(veth);
+			break;
+		}
+
+		sprintf(veth_path, "%s/veth%d", directory, netnr);
+		if (print_to_file(veth_path, veth) < 0) {
+			ret = -1;
+			goto out;
+		}
+
+		sprintf(veth_path, "%s/bridge%d", directory, netnr);
+		if (print_to_file(veth_path, bridge) < 0) {
+			ret = -1;
+			goto out;
+		}
+out:
+		free(veth);
+		free(bridge);
+		if (ret)
+			return ret;
+	}
+
+	current_criu_dir = directory;
+	is_dump = true;
+	ret = criu_dump();
+	current_criu_dir = NULL;
+
+	return ret;
+#else
+	return -ENOSYS;
+#endif
+}
+
+static int lxcapi_restore(struct lxc_container *c, char *service_address, char *directory)
+{
+#if HAVE_CRIU
+	int fd, ret = -1, netnr;
+	struct lxc_list *it;
+	struct lxc_rootfs *rootfs;
+
+	/* We only know how to restore containers with veth networks. */
+	lxc_list_for_each(it, &c->lxc_conf->network) {
+		struct lxc_netdev *n = it->elem;
+		if (!n->type & LXC_NET_VETH)
+			return -1;
+	}
+
+	criu_set_service_address(service_address);
+
+	if (criu_init_opts() < 0)
+		return -1;
+
+	fd = open(directory, O_DIRECTORY);
+	if (fd < 0)
+		return -1;
+
+	criu_set_images_dir_fd(fd);
+
+	criu_set_tcp_established(true);
+	criu_set_file_locks(true);
+
+	// gives Cannot find device "vethFONJ3E"
+	//criu_set_notify_cb(criu_net_callback);
+	criu_set_log_level(4);
+
+	/* CRIU needs the lxc root bind mounted so that it is the root of some
+	 * mount. */
+	rootfs = &c->lxc_conf->rootfs;
+
+	if (mkdir(rootfs->mount, 0755) < 0 && errno != EEXIST)
+		return -1;
+
+	if (mount(rootfs->path, rootfs->mount, NULL, MS_BIND, NULL) < 0) {
+		rmdir(rootfs->mount);
+		return -1;
+	}
+
+	criu_set_root(rootfs->mount);
+
+	netnr = 0;
+	lxc_list_for_each(it, &c->lxc_conf->network) {
+		char eth[128], veth[128], veth_path[PATH_MAX];
+		FILE *veth_f;
+		struct lxc_netdev *n = it->elem;
+
+		sprintf(veth_path, "%s/veth%d", directory, netnr);
+		veth_f = fopen(veth_path, "r");
+		if(!veth_f)
+			goto err;
+
+		if (fscanf(veth_f, "%128s", veth) <= 0) {
+			fclose(veth_f);
+			goto err;
+		}
+
+		if (n->name)
+			strncpy(eth, n->name, 128);
+		else
+			snprintf(eth, 128, "eth%d", netnr);
+
+		fclose(veth_f);
+
+		if (criu_add_veth_pair(eth, veth) < 0)
+			goto err;
+		netnr++;
+	}
+
+	current_criu_dir = directory;
+	is_dump = false;
+	ret = criu_restore();
+
+	current_criu_dir = NULL;
+err:
+	if (ret < 0) {
+		umount(rootfs->mount);
+		rmdir(rootfs->mount);
+		return ret;
+	}
+
+	return ret;
+#else
+	return -ENOSYS;
+#endif
+}
+
 static int lxcapi_attach_run_waitl(struct lxc_container *c, lxc_attach_options_t *options, const char *program, const char *arg, ...)
 {
 	va_list ap;
@@ -3586,6 +3847,8 @@ struct lxc_container *lxc_container_new(const char *name, const char *configpath
 	c->may_control = lxcapi_may_control;
 	c->add_device_node = lxcapi_add_device_node;
 	c->remove_device_node = lxcapi_remove_device_node;
+	c->checkpoint = lxcapi_checkpoint;
+	c->restore = lxcapi_restore;
 
 	/* we'll allow the caller to update these later */
 	if (lxc_log_init(NULL, "none", NULL, "lxc_container", 0, c->config_path)) {
