@@ -95,7 +95,7 @@ int main(int argc, char *argv[])
 		exit(1);
 	}
 
-	ret = c->restore(c, "/tmp/criusocket", checkpoint_dir);
+	ret = c->restore(c, checkpoint_dir);
 	switch (ret) {
 	case -ECONNREFUSED:
 		fprintf(stderr, "Unable to connect to CRIU daemon.\n");

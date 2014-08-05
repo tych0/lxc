@@ -779,7 +779,7 @@ struct lxc_container {
 	 * \return \c 0 on success, \c <0 on failure (see criu_dump in criu/criu.h for details).
 	 * present at compile time.
 	 */
-	int (*checkpoint)(struct lxc_container *c, char *service_address, char *directory);
+	int (*checkpoint)(struct lxc_container *c, char *directory);
 
 	/*!
 	 * \brief Restore a container from a checkpoint.
@@ -788,7 +788,7 @@ struct lxc_container {
 	 *
 	 * \return \c 0 on success \c <0 on failure (see criu_
 	 */
-	int (*restore)(struct lxc_container *c, char *service_address, char *directory);
+	int (*restore)(struct lxc_container *c, char *directory);
 };
 
 /*!
