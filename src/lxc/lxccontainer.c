@@ -3458,100 +3458,14 @@ static bool lxcapi_remove_device_node(struct lxc_container *c, const char *src_p
 	return add_remove_device_node(c, src_path, dest_path, false);
 }
 
-#if 0
-/* Iterate over every bridge/veth pair in a criu dump directory. */
-static int for_each_if_criu(char *directory, void *m, int (*cb)(void *m, char *bridge, char *veth))
-{
-	int netnr;
-
-	for (netnr = 0; ;netnr++) {
-		FILE *f;
-		char path[PATH_MAX], veth[128], bridge[128];
-
-		sprintf(path, "%s/veth%d", directory, netnr);
-		f = fopen(path, "r");
-		if (!f)
-			return -1;
-
-		if (fscanf(f, "%128s", veth) <= 0) {
-			fclose(f);
-			return -1;
-		}
-		fclose(f);
-
-		sprintf(path, "%s/bridge%d", directory, netnr);
-		f = fopen(path, "r");
-		if (!f)
-			return -1;
-
-		if (fscanf(f, "%128s", bridge) <= 0) {
-			fclose(f);
-			return -1;
-		}
-		fclose(f);
-
-		if (cb(m, bridge, veth)) {
-			return -1;
-		}
-	}
-
-	return 0;
-}
-
-static int brctl(void *action, char *bridge, char *veth)
-{
-	char cmd[1024];
-	sprintf(cmd, "brctl %s %s %s", (char *)action, bridge, veth);
-	return system(cmd);
-}
-
-static int restore_unlock(void *unused, char *bridge, char *veth)
-{
-	char cmd[1024];
-
-	sprintf(cmd, "ip link set up dev %s", veth);
-	if (system(cmd))
-		return -1;
-
-	sprintf(cmd, "brctl addif %s %s", bridge, veth);
-	if (system(cmd))
-		return -1;
-
-	return 0;
-}
-
-/* Used to pass information to criu_net_callback. */
-static char *current_criu_dir;
-static bool is_dump;
-
-static int criu_net_callback(char *action, criu_notify_arg_t na)
-{
-	if (is_dump) {
-		if (strcmp(action, "network-lock")) {
-			for_each_if_criu(current_criu_dir, "addif", brctl);
-		} else if (strcmp(action, "network-unlock")) {
-			for_each_if_criu(current_criu_dir, "delif", brctl);
-		}
-	} else {
-		if (strcmp(action, "network-unlock")) {
-			for_each_if_criu(current_criu_dir, NULL, restore_unlock);
-		}
-	}
-
-	return 0;
-}
-#endif
-
 #if HAVE_CRIU
-int read_criu_file(const char *directory, const char *file, int netnr, char *out)
+static int read_criu_file(const char *directory, const char *file, int netnr, char *out)
 {
 	char path[PATH_MAX];
 	int ret;
 	FILE *f;
 
-	if (sprintf(path, "%s/%s%d", directory, file, netnr) != 3)
-		return -1;
-
+	sprintf(path, "%s/%s%d", directory, file, netnr);
 	f = fopen(path, "r");
 	if (!f)
 		return -1;
@@ -3564,17 +3478,17 @@ int read_criu_file(const char *directory, const char *file, int netnr, char *out
 	return 0;
 }
 
-int exec_criu(const char *action, const char *directory, struct lxc_container *c)
+static int exec_criu(const char *action, const char *directory, struct lxc_container *c)
 {
 	char **argv;
 	int static_args = 0, argc, i;
 	struct lxc_list *it;
 
 	/* The command line always looks like:
-	 * criu $(action) -vvvvv --tcp-established --file-locks --manage-cgroups \
+	 * criu $(action) --tcp-established --file-locks --manage-cgroups \
 	 *     --action-script foo.sh -D $(directory)
 	 * +1 for final NULL */
-	static_args += 11;
+	static_args += 10;
 
 	if (strcmp(action, "dump") == 0) {
 		/* -t pid */
@@ -3592,9 +3506,8 @@ int exec_criu(const char *action, const char *directory, struct lxc_container *c
 
 	memset(argv, 0, static_args * sizeof(*argv));
 	argc = 0;
-	argv[argc++] = strdup("criu");
+	argv[argc++] = strdup("/usr/local/sbin/criu");
 	argv[argc++] = strdup(action);
-	argv[argc++] = strdup("-vvvvv");
 	argv[argc++] = strdup("--tcp-established");
 	argv[argc++] = strdup("--file-locks");
 	argv[argc++] = strdup("--manage-cgroups");
@@ -3606,7 +3519,7 @@ int exec_criu(const char *action, const char *directory, struct lxc_container *c
 	if (strcmp(action, "dump") == 0) {
 		char pid[32];
 
-		if (sprintf(pid, "%ld", (long) c->init_pid(c)) != 1)
+		if (sprintf(pid, "%ld", (long) c->init_pid(c)) < 0)
 			goto err;
 
 		argv[argc++] = strdup("-t");
@@ -3638,13 +3551,14 @@ int exec_criu(const char *action, const char *directory, struct lxc_container *c
 			// this needs to be cleaned up since we need to
 			// know the bridge during restore. i.e.
 			// network-script.sh probably needs another argument.
-			if (sprintf(buf, "%s=%s", eth, veth) != 2)
+			if (sprintf(buf, "%s=%s", eth, veth) < 0)
 				goto err;
 
 			/* final NULL and --veth-pair eth0:vethASDF */
 			m = realloc(argv, (argc + 1 + 2) * sizeof(*argv));
 			if (!m)
 				goto err;
+			argv = m;
 
 			argv[argc++] = strdup("--veth-pair");
 			argv[argc++] = strdup(buf);
@@ -3667,7 +3581,6 @@ err:
 	free(argv);
 	return -1;
 }
-
 #endif
 
 static int lxcapi_checkpoint(struct lxc_container *c, char *directory)
