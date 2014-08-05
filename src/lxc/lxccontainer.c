@@ -3675,25 +3675,31 @@ static int lxcapi_restore(struct lxc_container *c, char *directory)
 			return -1;
 	}
 
-	/* CRIU needs the lxc root bind mounted so that it is the root of some
-	 * mount. */
-	rootfs = &c->lxc_conf->rootfs;
-
-	if (mkdir(rootfs->mount, 0755) < 0 && errno != EEXIST)
-		return -1;
-
-	if (mount(rootfs->path, rootfs->mount, NULL, MS_BIND, NULL) < 0) {
-		rmdir(rootfs->mount);
-		return -1;
-	}
-
 	pid = fork();
 	if (pid < 0)
-		goto err;
+		return -1;
 
 	if (pid == 0) {
+		unshare(CLONE_NEWNS);
+
+		/* CRIU needs the lxc root bind mounted so that it is the root of some
+		 * mount. */
+		rootfs = &c->lxc_conf->rootfs;
+
+		if (mkdir(rootfs->mount, 0755) < 0 && errno != EEXIST)
+			return -1;
+
+		if (mount(rootfs->path, rootfs->mount, NULL, MS_BIND, NULL) < 0) {
+			rmdir(rootfs->mount);
+			return -1;
+		}
+
 		if (exec_criu("restore", directory, c))
 			goto err;
+err:
+		umount(rootfs->mount);
+		rmdir(rootfs->mount);
+		return -1;
 	} else {
 		// spawn lxc-monitor here
 		//lxc_monitord_spawn(c->config_path);
@@ -3701,10 +3707,6 @@ static int lxcapi_restore(struct lxc_container *c, char *directory)
 
 	return 0;
 
-err:
-	umount(rootfs->mount);
-	rmdir(rootfs->mount);
-	return -1;
 #else
 	return -ENOSYS;
 #endif
