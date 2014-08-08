@@ -3480,15 +3480,15 @@ static int read_criu_file(const char *directory, const char *file, int netnr, ch
 
 static int exec_criu(const char *action, const char *directory, struct lxc_container *c)
 {
-	char **argv;
+	char **argv, log[PATH_MAX];
 	int static_args = 0, argc, i;
 	struct lxc_list *it;
 
 	/* The command line always looks like:
 	 * criu $(action) --tcp-established --file-locks --manage-cgroups \
-	 *     --action-script foo.sh -D $(directory)
+	 *     --action-script foo.sh -D $(directory) -o $(directory)/$(action).log
 	 * +1 for final NULL */
-	static_args += 10;
+	static_args += 12;
 
 	if (strcmp(action, "dump") == 0) {
 		/* -t pid */
@@ -3499,6 +3499,8 @@ static int exec_criu(const char *action, const char *directory, struct lxc_conta
 	} else {
 		return -1;
 	}
+
+	sprintf(log, "%s/%s.log", directory, action);
 
 	argv = malloc(static_args * sizeof(*argv));
 	if (!argv)
@@ -3515,6 +3517,8 @@ static int exec_criu(const char *action, const char *directory, struct lxc_conta
 	argv[argc++] = strdup("/home/ubuntu/network-script.sh");
 	argv[argc++] = strdup("-D");
 	argv[argc++] = strdup(directory);
+	argv[argc++] = strdup("-o");
+	argv[argc++] = strdup(log);
 
 	if (strcmp(action, "dump") == 0) {
 		char pid[32];
@@ -3562,7 +3566,7 @@ static int exec_criu(const char *action, const char *directory, struct lxc_conta
 
 			argv[argc++] = strdup("--veth-pair");
 			argv[argc++] = strdup(buf);
-			argv[argc+1] = NULL;
+			argv[argc] = NULL;
 
 			netnr++;
 		}
@@ -3675,6 +3679,8 @@ static int lxcapi_restore(struct lxc_container *c, char *directory)
 			return -1;
 	}
 
+	lxc_monitord_spawn(c->config_path);
+
 	pid = fork();
 	if (pid < 0)
 		return -1;
@@ -3700,9 +3706,6 @@ err:
 		umount(rootfs->mount);
 		rmdir(rootfs->mount);
 		return -1;
-	} else {
-		// spawn lxc-monitor here
-		//lxc_monitord_spawn(c->config_path);
 	}
 
 	return 0;
