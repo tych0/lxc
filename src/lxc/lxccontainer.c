@@ -3508,17 +3508,25 @@ static int exec_criu(const char *action, const char *directory, struct lxc_conta
 
 	memset(argv, 0, static_args * sizeof(*argv));
 	argc = 0;
-	argv[argc++] = strdup("/usr/local/sbin/criu");
-	argv[argc++] = strdup(action);
-	argv[argc++] = strdup("--tcp-established");
-	argv[argc++] = strdup("--file-locks");
-	argv[argc++] = strdup("--manage-cgroups");
-	argv[argc++] = strdup("--action-script");
-	argv[argc++] = strdup("/home/ubuntu/network-script.sh");
-	argv[argc++] = strdup("-D");
-	argv[argc++] = strdup(directory);
-	argv[argc++] = strdup("-o");
-	argv[argc++] = strdup(log);
+
+#define DECLARE_ARG(arg) 			\
+	do {					\
+		argv[argc++] = strdup(arg);	\
+		if (!argv[argc-1])		\
+			goto err;		\
+	} while (0)
+
+	DECLARE_ARG("/usr/local/sbin/criu");
+	DECLARE_ARG(action);
+	DECLARE_ARG("--tcp-established");
+	DECLARE_ARG("--file-locks");
+	DECLARE_ARG("--manage-cgroups");
+	DECLARE_ARG("--action-script");
+	DECLARE_ARG("/home/ubuntu/network-script.sh");
+	DECLARE_ARG("-D");
+	DECLARE_ARG(directory);
+	DECLARE_ARG("-o");
+	DECLARE_ARG(log);
 
 	if (strcmp(action, "dump") == 0) {
 		char pid[32];
@@ -3526,11 +3534,11 @@ static int exec_criu(const char *action, const char *directory, struct lxc_conta
 		if (sprintf(pid, "%ld", (long) c->init_pid(c)) < 0)
 			goto err;
 
-		argv[argc++] = strdup("-t");
-		argv[argc++] = strdup(pid);
+		DECLARE_ARG("-t");
+		DECLARE_ARG(pid);
 	} else if (strcmp(action, "restore") == 0) {
-		argv[argc++] = strdup("--root");
-		argv[argc++] = strdup(c->lxc_conf->rootfs.mount);
+		DECLARE_ARG("--root");
+		DECLARE_ARG(c->lxc_conf->rootfs.mount);
 	}
 
 	if (strcmp(action, "restore") == 0) {
@@ -3552,9 +3560,6 @@ static int exec_criu(const char *action, const char *directory, struct lxc_conta
 			else
 				snprintf(eth, 128, "eth%d", netnr);
 
-			// this needs to be cleaned up since we need to
-			// know the bridge during restore. i.e.
-			// network-script.sh probably needs another argument.
 			if (sprintf(buf, "%s=%s", eth, veth) < 0)
 				goto err;
 
@@ -3564,18 +3569,15 @@ static int exec_criu(const char *action, const char *directory, struct lxc_conta
 				goto err;
 			argv = m;
 
-			argv[argc++] = strdup("--veth-pair");
-			argv[argc++] = strdup(buf);
+			DECLARE_ARG("--veth-pair");
+			DECLARE_ARG(buf);
 			argv[argc] = NULL;
 
 			netnr++;
 		}
 	}
 
-	for (i = 0; i < argc; i++) {
-		if (!argv[i])
-			goto err;
-	}
+#undef DECLARE_ARG
 
 	return execv(argv[0], argv);
 
