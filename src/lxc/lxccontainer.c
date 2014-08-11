@@ -3522,7 +3522,7 @@ static int exec_criu(const char *action, const char *directory, struct lxc_conta
 	DECLARE_ARG("--file-locks");
 	DECLARE_ARG("--manage-cgroups");
 	DECLARE_ARG("--action-script");
-	DECLARE_ARG("lxc-restore-net");
+	DECLARE_ARG(LIBEXECDIR "/lxc/lxc-restore-net");
 	DECLARE_ARG("-D");
 	DECLARE_ARG(directory);
 	DECLARE_ARG("-o");

@@ -168,7 +168,6 @@ bin_SCRIPTS = lxc-checkconfig
 if ENABLE_CRIU
 liblxc_so_LDADD += $(CRIU_LIBS)
 liblxc_so_CFLAGS += $(CRIU_CFLAGS)
-bin_SCRIPTS += lxc-restore-net
 endif
 
 EXTRA_DIST = \
@@ -215,6 +214,8 @@ sbin_PROGRAMS = init.lxc
 pkglibexec_PROGRAMS = \
 	lxc-monitord \
 	lxc-user-nic
+pkglibexec_SCRIPTS = \
+	lxc-restore-net
 
 AM_LDFLAGS = -Wl,-E
 if ENABLE_RPATH

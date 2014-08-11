@@ -16,7 +16,6 @@ while [ -f "$dir/eth$i" ] && [ -f "$dir/veth$i" ] && [ -f "$dir/bridge$i" ]; do
 	bridge=$(cat "$dir/bridge$i")
 
 	if [ "$CRTOOLS_SCRIPT_ACTION" == "network-lock" ]; then
-		echo Locking network for container\'s $veth
 		brctl delif $bridge $veth
 	fi
 
