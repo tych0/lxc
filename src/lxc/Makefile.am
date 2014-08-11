@@ -158,17 +158,18 @@ liblxc_so_LDFLAGS = \
 
 liblxc_so_LDADD = $(CAP_LIBS) $(APPARMOR_LIBS) $(SELINUX_LIBS) $(SECCOMP_LIBS)
 
-if ENABLE_CRIU
-liblxc_so_LDADD += $(CRIU_LIBS)
-liblxc_so_CFLAGS += $(CRIU_CFLAGS)
-endif
-
 if ENABLE_CGMANAGER
 liblxc_so_LDADD += $(CGMANAGER_LIBS) $(DBUS_LIBS) $(NIH_LIBS) $(NIH_DBUS_LIBS)
 liblxc_so_CFLAGS += $(CGMANAGER_CFLAGS) $(DBUS_CFLAGS) $(NIH_CFLAGS) $(NIH_DBUS_CFLAGS)
 endif
 
 bin_SCRIPTS = lxc-checkconfig
+
+if ENABLE_CRIU
+liblxc_so_LDADD += $(CRIU_LIBS)
+liblxc_so_CFLAGS += $(CRIU_CFLAGS)
+bin_SCRIPTS += lxc-restore-net
+endif
 
 EXTRA_DIST = \
 	lxc-device \

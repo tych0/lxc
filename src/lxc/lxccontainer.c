@@ -3522,7 +3522,7 @@ static int exec_criu(const char *action, const char *directory, struct lxc_conta
 	DECLARE_ARG("--file-locks");
 	DECLARE_ARG("--manage-cgroups");
 	DECLARE_ARG("--action-script");
-	DECLARE_ARG("/home/ubuntu/network-script.sh");
+	DECLARE_ARG("lxc-restore-net");
 	DECLARE_ARG("-D");
 	DECLARE_ARG(directory);
 	DECLARE_ARG("-o");
@@ -3544,22 +3544,13 @@ static int exec_criu(const char *action, const char *directory, struct lxc_conta
 	if (strcmp(action, "restore") == 0) {
 		int netnr = 0;
 		lxc_list_for_each(it, &c->lxc_conf->network) {
-			char eth[128], veth[128], bridge[128], buf[257];
+			char eth[128], veth[128], buf[257];
 			void *m;
-			struct lxc_netdev *n = it->elem;
 
 			if (read_criu_file(directory, "veth", netnr, veth))
 				goto err;
-
-			// TODO: somehow tell network-script.sh about bridge
-			if (read_criu_file(directory, "bridge", netnr, bridge))
+			if (read_criu_file(directory, "eth", netnr, eth))
 				goto err;
-
-			if (n->name)
-				strncpy(eth, n->name, 128);
-			else
-				snprintf(eth, 128, "eth%d", netnr);
-
 			if (sprintf(buf, "%s=%s", eth, veth) < 0)
 				goto err;
 
@@ -3606,8 +3597,10 @@ static int lxcapi_checkpoint(struct lxc_container *c, char *directory)
 	if (mkdir(directory, 0700) < 0 && errno != EEXIST)
 		return -1;
 
-	for (netnr = 0; ; netnr++) {
-		char *veth, *bridge, veth_path[PATH_MAX];
+	netnr = 0;
+	lxc_list_for_each(it, &c->lxc_conf->network) {
+		char *veth, *bridge, veth_path[PATH_MAX], eth[128];
+		struct lxc_netdev *n = it->elem;
 
 		sprintf(veth_path, "lxc.network.%d.veth.pair", netnr);
 		veth = c->get_running_config_item(c, veth_path);
@@ -3632,6 +3625,18 @@ static int lxcapi_checkpoint(struct lxc_container *c, char *directory)
 			ret = -1;
 			goto out;
 		}
+
+		if (n->name)
+			strncpy(eth, n->name, 128);
+		else
+			snprintf(eth, 128, "eth%d", netnr);
+
+		sprintf(veth_path, "%s/eth%d", directory, netnr);
+		if (print_to_file(veth_path, eth) < 0) {
+			ret = -1;
+			goto out;
+		}
+
 out:
 		free(veth);
 		free(bridge);
