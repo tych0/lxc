@@ -3499,8 +3499,8 @@ static void exec_criu(const char *action, const char *directory, struct lxc_cont
 		/* -t pid */
 		static_args += 2;
 	} else if (strcmp(action, "restore") == 0) {
-		/* --root $(lxc_mount_point) */
-		static_args += 2;
+		/* --root $(lxc_mount_point) --restore-detached */
+		static_args += 3;
 	} else {
 		return;
 	}
@@ -3544,6 +3544,7 @@ static void exec_criu(const char *action, const char *directory, struct lxc_cont
 	} else if (strcmp(action, "restore") == 0) {
 		DECLARE_ARG("--root");
 		DECLARE_ARG(c->lxc_conf->rootfs.mount);
+		DECLARE_ARG("--restore-detached");
 	}
 
 	if (strcmp(action, "restore") == 0) {
