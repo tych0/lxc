@@ -55,6 +55,11 @@
 #include "monitor.h"
 #include "namespace.h"
 #include "lxclock.h"
+#include "sync.h"
+
+// HACK
+int lxc_poll(const char *name, struct lxc_handler *handler);
+int lxc_set_state(const char *name, struct lxc_handler *handler, lxc_state_t state);
 
 #if HAVE_IFADDRS_H
 #include <ifaddrs.h>
@@ -3478,7 +3483,7 @@ static int read_criu_file(const char *directory, const char *file, int netnr, ch
 	return 0;
 }
 
-static int exec_criu(const char *action, const char *directory, struct lxc_container *c)
+static void exec_criu(const char *action, const char *directory, struct lxc_container *c)
 {
 	char **argv, log[PATH_MAX];
 	int static_args = 0, argc, i;
@@ -3497,14 +3502,14 @@ static int exec_criu(const char *action, const char *directory, struct lxc_conta
 		/* --root $(lxc_mount_point) */
 		static_args += 2;
 	} else {
-		return -1;
+		return;
 	}
 
 	sprintf(log, "%s/%s.log", directory, action);
 
 	argv = malloc(static_args * sizeof(*argv));
 	if (!argv)
-		return -1;
+		return;
 
 	memset(argv, 0, static_args * sizeof(*argv));
 	argc = 0;
@@ -3570,13 +3575,11 @@ static int exec_criu(const char *action, const char *directory, struct lxc_conta
 
 #undef DECLARE_ARG
 
-	return execv(argv[0], argv);
-
+	execv(argv[0], argv);
 err:
 	for (i = 0; argv[i]; i++)
 		free(argv[i]);
 	free(argv);
-	return -1;
 }
 #endif
 
@@ -3649,8 +3652,8 @@ out:
 		return -1;
 
 	if (pid == 0) {
-		if (exec_criu("dump", directory, c))
-			return -1;
+		exec_criu("dump", directory, c);
+		return -1;
 	} else {
 		pid_t w = waitpid(pid, &status, 0);
 		if (w == -1) {
@@ -3686,19 +3689,26 @@ static int lxcapi_restore(struct lxc_container *c, char *directory)
 			return -1;
 	}
 
-	lxc_monitord_spawn(c->config_path);
+	struct lxc_handler *handler;
 
-	pid = fork();
-	if (pid < 0)
+	handler = lxc_init(c->name, c->lxc_conf, c->config_path);
+	if (!handler)
 		return -1;
 
-	if (pid == 0) {
-		unshare(CLONE_NEWNS);
+	if (lxc_sync_init(handler))
+		return -1;
 
-		/* CRIU needs the lxc root bind mounted so that it is the root of some
-		 * mount. */
-		rootfs = &c->lxc_conf->rootfs;
+	unshare(CLONE_NEWNS);
 
+	/* CRIU needs the lxc root bind mounted so that it is the root of some
+	 * mount. */
+	rootfs = &c->lxc_conf->rootfs;
+
+	if (rootfs_is_blockdev(c->lxc_conf)) {
+		if (do_rootfs_setup(c->lxc_conf, c->name, c->config_path) < 0)
+			return -1;
+	}
+	else {
 		if (mkdir(rootfs->mount, 0755) < 0 && errno != EEXIST)
 			return -1;
 
@@ -3706,13 +3716,24 @@ static int lxcapi_restore(struct lxc_container *c, char *directory)
 			rmdir(rootfs->mount);
 			return -1;
 		}
+	}
 
-		if (exec_criu("restore", directory, c))
-			goto err;
-err:
+
+	pid = fork();
+	if (pid < 0)
+		return -1;
+
+	if (pid == 0) {
+		/* exec_criu() returning is an error */
+		exec_criu("restore", directory, c);
 		umount(rootfs->mount);
 		rmdir(rootfs->mount);
 		return -1;
+	} else {
+		if (lxc_poll(c->name, handler)) {
+			//lxc_abort(name, handler);
+			return -1;
+		}
 	}
 
 	return 0;
