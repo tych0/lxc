@@ -3499,8 +3499,8 @@ static void exec_criu(const char *action, const char *directory, struct lxc_cont
 		/* -t pid */
 		static_args += 2;
 	} else if (strcmp(action, "restore") == 0) {
-		/* --root $(lxc_mount_point) --restore-detached */
-		static_args += 3;
+		/* --root $(lxc_mount_point) --restore-detached --pidfile $foo */
+		static_args += 5;
 	} else {
 		return;
 	}
@@ -3545,6 +3545,8 @@ static void exec_criu(const char *action, const char *directory, struct lxc_cont
 		DECLARE_ARG("--root");
 		DECLARE_ARG(c->lxc_conf->rootfs.mount);
 		DECLARE_ARG("--restore-detached");
+		DECLARE_ARG("--pidfile");
+		DECLARE_ARG("/tmp/checkpoint/newpid");
 	}
 
 	if (strcmp(action, "restore") == 0) {
@@ -3719,7 +3721,6 @@ static int lxcapi_restore(struct lxc_container *c, char *directory)
 		}
 	}
 
-
 	pid = fork();
 	if (pid < 0)
 		return -1;
@@ -3731,6 +3732,46 @@ static int lxcapi_restore(struct lxc_container *c, char *directory)
 		rmdir(rootfs->mount);
 		return -1;
 	} else {
+		int status;
+		pid_t w = waitpid(pid, &status, 0);
+
+		if (w == -1) {
+			perror("waitpid");
+			return -1;
+		}
+
+		if (WIFEXITED(status)) {
+			if (WEXITSTATUS(status)) {
+				//lxc_abort(name, handler);
+				return -1;
+			}
+			else {
+				int netnr = 0;
+				FILE *f = fopen("/tmp/checkpoint/newpid", "r");
+
+				if (fscanf(f, "%ld", (long*) &handler->pid) != 1) {
+					ERROR("reading restore pid failed");
+					return -1;
+				}
+				fclose(f);
+
+				lxc_list_for_each(it, &c->lxc_conf->network) {
+					char eth[128], veth[128];
+					struct lxc_netdev *netdev = it->elem;
+
+					if (read_criu_file(directory, "veth", netnr, veth))
+						return -1;
+					if (read_criu_file(directory, "eth", netnr, eth))
+						return -1;
+					netdev->priv.veth_attr.pair = strdup(veth);
+					netnr++;
+				}
+
+				if (lxc_set_state(c->name, handler, RUNNING))
+					return -1;
+			}
+		}
+
 		if (lxc_poll(c->name, handler)) {
 			//lxc_abort(name, handler);
 			return -1;
