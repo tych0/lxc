@@ -3483,7 +3483,7 @@ static int read_criu_file(const char *directory, const char *file, int netnr, ch
 	return 0;
 }
 
-static void exec_criu(const char *action, const char *directory, struct lxc_container *c)
+static void exec_criu(const char *action, const char *directory, struct lxc_container *c, char *pidfile)
 {
 	char **argv, log[PATH_MAX];
 	int static_args = 0, argc, i;
@@ -3499,10 +3499,15 @@ static void exec_criu(const char *action, const char *directory, struct lxc_cont
 		/* -t pid */
 		static_args += 2;
 	} else if (strcmp(action, "restore") == 0) {
-		/* --root $(lxc_mount_point) --restore-detached --pidfile $foo */
-		static_args += 5;
+		/* --root $(lxc_mount_point) --restore-detached */
+		static_args += 3;
 	} else {
 		return;
+	}
+
+	if (pidfile) {
+		/* --pidfile $foo */
+		static_args += 2;
 	}
 
 	sprintf(log, "%s/%s.log", directory, action);
@@ -3545,8 +3550,11 @@ static void exec_criu(const char *action, const char *directory, struct lxc_cont
 		DECLARE_ARG("--root");
 		DECLARE_ARG(c->lxc_conf->rootfs.mount);
 		DECLARE_ARG("--restore-detached");
+	}
+
+	if (pidfile) {
 		DECLARE_ARG("--pidfile");
-		DECLARE_ARG("/tmp/checkpoint/newpid");
+		DECLARE_ARG(pidfile);
 	}
 
 	if (strcmp(action, "restore") == 0) {
@@ -3655,7 +3663,7 @@ out:
 		return -1;
 
 	if (pid == 0) {
-		exec_criu("dump", directory, c);
+		exec_criu("dump", directory, c, NULL);
 		return -1;
 	} else {
 		pid_t w = waitpid(pid, &status, 0);
@@ -3684,6 +3692,7 @@ static int lxcapi_restore(struct lxc_container *c, char *directory)
 	pid_t pid;
 	struct lxc_list *it;
 	struct lxc_rootfs *rootfs;
+	char pidfile[L_tmpnam];
 
 	/* We only know how to restore containers with veth networks. */
 	lxc_list_for_each(it, &c->lxc_conf->network) {
@@ -3691,6 +3700,9 @@ static int lxcapi_restore(struct lxc_container *c, char *directory)
 		if (!n->type & LXC_NET_VETH)
 			return -1;
 	}
+
+	if (!tmpnam(pidfile))
+		return -1;
 
 	struct lxc_handler *handler;
 
@@ -3727,7 +3739,7 @@ static int lxcapi_restore(struct lxc_container *c, char *directory)
 
 	if (pid == 0) {
 		/* exec_criu() returning is an error */
-		exec_criu("restore", directory, c);
+		exec_criu("restore", directory, c, pidfile);
 		umount(rootfs->mount);
 		rmdir(rootfs->mount);
 		return -1;
@@ -3746,26 +3758,44 @@ static int lxcapi_restore(struct lxc_container *c, char *directory)
 				return -1;
 			}
 			else {
-				int netnr = 0;
-				FILE *f = fopen("/tmp/checkpoint/newpid", "r");
+				int netnr = 0, ret;
+				FILE *f = fopen(pidfile, "r");
+				if (!f) {
+					perror("reading pidfile");
+					ERROR("couldn't read restore's init pidfile %s\n", pidfile);
+					return -1;
+				}
 
-				if (fscanf(f, "%ld", (long*) &handler->pid) != 1) {
+				ret = fscanf(f, "%ld", (long*) &handler->pid);
+				fclose(f);
+				if (ret != 1) {
 					ERROR("reading restore pid failed");
 					return -1;
 				}
-				fclose(f);
 
+				if (container_mem_lock(c))
+					return -1;
+
+				ret = 0;
 				lxc_list_for_each(it, &c->lxc_conf->network) {
 					char eth[128], veth[128];
 					struct lxc_netdev *netdev = it->elem;
 
-					if (read_criu_file(directory, "veth", netnr, veth))
-						return -1;
-					if (read_criu_file(directory, "eth", netnr, eth))
-						return -1;
+					if (read_criu_file(directory, "veth", netnr, veth)) {
+						ret = -1;
+						goto out_unlock;
+					}
+					if (read_criu_file(directory, "eth", netnr, eth)) {
+						ret = -1;
+						goto out_unlock;
+					}
 					netdev->priv.veth_attr.pair = strdup(veth);
 					netnr++;
 				}
+out_unlock:
+				container_mem_unlock(c);
+				if (ret)
+					return ret;
 
 				if (lxc_set_state(c->name, handler, RUNNING))
 					return -1;
