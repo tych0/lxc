@@ -3698,18 +3698,11 @@ static bool criu_ok(struct lxc_container *c)
 	return true;
 }
 
-static bool lxcapi_checkpoint(struct lxc_container *c, char *directory, bool stop, bool verbose)
+static bool dump_net_info(struct lxc_container *c, char *directory)
 {
-	int netnr, status;
+	int netnr;
 	struct lxc_list *it;
 	bool error = false;
-	pid_t pid;
-
-	if (!criu_ok(c))
-		return false;
-
-	if (mkdir(directory, 0700) < 0 && errno != EEXIST)
-		return false;
 
 	netnr = 0;
 	lxc_list_for_each(it, &c->lxc_conf->network) {
@@ -3776,6 +3769,23 @@ out:
 			return false;
 	}
 
+	return true;
+}
+
+static bool lxcapi_checkpoint(struct lxc_container *c, char *directory, bool stop, bool verbose)
+{
+	pid_t pid;
+	int status;
+
+	if (!criu_ok(c))
+		return false;
+
+	if (mkdir(directory, 0700) < 0 && errno != EEXIST)
+		return false;
+
+	if (!dump_net_info(c, directory))
+		return false;
+
 	pid = fork();
 	if (pid < 0)
 		return false;
@@ -3807,10 +3817,44 @@ out:
 	}
 }
 
+static bool restore_net_info(struct lxc_container *c, char *directory)
+{
+	struct lxc_list *it;
+	bool error = false;
+	int netnr = 0;
+
+	if (container_mem_lock(c)) {
+		return false;
+	}
+
+	lxc_list_for_each(it, &c->lxc_conf->network) {
+		char eth[128], veth[128];
+		struct lxc_netdev *netdev = it->elem;
+
+		if (read_criu_file(directory, "veth", netnr, veth)) {
+			error = true;
+			goto out_unlock;
+		}
+		if (read_criu_file(directory, "eth", netnr, eth)) {
+			error = true;
+			goto out_unlock;
+		}
+		netdev->priv.veth_attr.pair = strdup(veth);
+		if (!netdev->priv.veth_attr.pair) {
+			error = true;
+			goto out_unlock;
+		}
+		netnr++;
+	}
+
+out_unlock:
+	container_mem_unlock(c);
+	return !error;
+}
+
 static bool lxcapi_restore(struct lxc_container *c, char *directory, bool verbose)
 {
 	pid_t pid;
-	struct lxc_list *it;
 	struct lxc_rootfs *rootfs;
 	char pidfile[L_tmpnam];
 	struct lxc_handler *handler;
@@ -3896,7 +3940,7 @@ static bool lxcapi_restore(struct lxc_container *c, char *directory, bool verbos
 				goto out_fini_handler;
 			}
 			else {
-				int netnr = 0, ret;
+				int ret;
 				FILE *f = fopen(pidfile, "r");
 				if (!f) {
 					perror("reading pidfile");
@@ -3911,33 +3955,10 @@ static bool lxcapi_restore(struct lxc_container *c, char *directory, bool verbos
 					goto out_fini_handler;
 				}
 
-				if (container_mem_lock(c))
+				if (!restore_net_info(c, directory)) {
+					ERROR("failed restoring network info");
 					goto out_fini_handler;
-
-				lxc_list_for_each(it, &c->lxc_conf->network) {
-					char eth[128], veth[128];
-					struct lxc_netdev *netdev = it->elem;
-
-					if (read_criu_file(directory, "veth", netnr, veth)) {
-						container_mem_unlock(c);
-						goto out_fini_handler;
-					}
-
-					if (read_criu_file(directory, "eth", netnr, eth)) {
-						container_mem_unlock(c);
-						goto out_fini_handler;
-					}
-
-					netdev->priv.veth_attr.pair = strdup(veth);
-					if (!netdev->priv.veth_attr.pair) {
-						container_mem_unlock(c);
-						goto out_fini_handler;
-					}
-
-					netnr++;
 				}
-
-				container_mem_unlock(c);
 
 				if (lxc_set_state(c->name, handler, RUNNING))
 					goto out_fini_handler;
