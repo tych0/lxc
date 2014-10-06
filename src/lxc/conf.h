@@ -403,6 +403,8 @@ extern int do_rootfs_setup(struct lxc_conf *conf, const char *name,
 
 struct cgroup_process_info;
 extern int lxc_setup(struct lxc_handler *handler);
+extern int setup_tty(const struct lxc_rootfs *rootfs,
+		     const struct lxc_tty_info *tty_info, char *ttydir)
 
 extern void lxc_rename_phys_nics_on_shutdown(int netnsfd, struct lxc_conf *conf);
 

@@ -945,7 +945,7 @@ static int setup_dev_symlinks(const struct lxc_rootfs *rootfs)
 	return 0;
 }
 
-static int setup_tty(const struct lxc_rootfs *rootfs,
+int setup_tty(const struct lxc_rootfs *rootfs,
 		     const struct lxc_tty_info *tty_info, char *ttydir)
 {
 	char path[MAXPATHLEN], lxcpath[MAXPATHLEN];
