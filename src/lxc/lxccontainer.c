@@ -3772,6 +3772,48 @@ out:
 	return true;
 }
 
+static bool dump_tty_info(struct lxc_container *c, char *directory)
+{
+	int i = 0, ret;
+	char path[PATH_MAX];
+	FILE *out;
+	struct stat sb;
+	bool has_error = true;
+
+	ret = snprintf(path, PATH_MAX, "%s/%s", directory, "ttyinfo");
+	if (ret >= sizeof(path))
+		return false;
+
+	out = fopen(path, "w");
+	if (!out)
+		return false;
+
+	for (i = 0; i < c->lxc_conf->tty; i++) {
+		ret = snprintf(path, PATH_MAX, "%s/dev/%s/tty%d", c->lxcpath, c->lxc_conf->ttydir, i);
+		if (ret >= sizeof(path))
+			goto out;
+
+		if (fstat(path, &sb))
+			goto out;
+
+		fprintf(out, "tty%d:%d", i, minor(sb.st_dev));
+	}
+
+	ret = snprintf(path, PATH_MAX, c->lxcpath, "dev/console");
+	if (ret >= sizeof(path))
+		goto out:
+
+	if (fstat(path, &sb))
+		goto out;
+
+	fprintf(out, "console:%d", minor(sb.st_dev));
+	has_error = false;
+
+out:
+	fclose(out);
+	return !has_error;
+}
+
 static bool lxcapi_checkpoint(struct lxc_container *c, char *directory, bool stop, bool verbose)
 {
 	pid_t pid;
@@ -3781,6 +3823,9 @@ static bool lxcapi_checkpoint(struct lxc_container *c, char *directory, bool sto
 		return false;
 
 	if (mkdir(directory, 0700) < 0 && errno != EEXIST)
+		return false;
+
+	if (!dump_tty_info(c, directory))
 		return false;
 
 	if (!dump_net_info(c, directory))
@@ -3852,6 +3897,38 @@ out_unlock:
 	return !error;
 }
 
+static bool restore_tty_info(struct lxc_container *c, char *directory)
+{
+	bool has_error = true;
+	FILE *in;
+	char path[PATH_MAX], buf[1024];
+	int ttyno, hostminor;
+
+	ret = snprintf(path, PATH_MAX, "%s/ttyinfo");
+	if (ret >= sizeof(path))
+		return false;
+
+	in = fopen(path, "r");
+	if (!in)
+		return false;
+
+	while (fscanf(in, "tty%d:%d", &ttyno, &hostminor)) {
+		ret = snprintf(path, PATH_MAX, "%s/dev/%s/tty%d", c->lxcpath, c->lxc_conf->ttydir, ttyno);
+		if (ret >= sizeof(path))
+			goto out;
+
+		if (mount(
+	}
+
+	if (!fscanf(in, "console:%d", &hostminor))
+		goto out;
+
+	has_error = false;
+out:
+	fclose(in);
+	return !has_error;
+}
+
 static bool lxcapi_restore(struct lxc_container *c, char *directory, bool verbose)
 {
 	pid_t pid;
@@ -3912,6 +3989,9 @@ static bool lxcapi_restore(struct lxc_container *c, char *directory, bool verbos
 				exit(1);
 			}
 		}
+
+		if (restore_tty_info(c, directory))
+			exit(1);
 
 		os.action = "restore";
 		os.directory = directory;
