@@ -3777,7 +3777,6 @@ static bool dump_tty_info(struct lxc_container *c, char *directory)
 	int i = 0, ret;
 	char path[PATH_MAX];
 	FILE *out;
-	struct stat sb;
 	bool has_error = true;
 
 	ret = snprintf(path, PATH_MAX, "%s/%s", directory, "ttyinfo");
@@ -3789,26 +3788,14 @@ static bool dump_tty_info(struct lxc_container *c, char *directory)
 		return false;
 
 	for (i = 0; i < c->lxc_conf->tty; i++) {
-		ret = snprintf(path, PATH_MAX, "%s/dev/%s/tty%d", c->lxcpath, c->lxc_conf->ttydir, i);
+		ret = snprintf(path, PATH_MAX, "/dev/%s/tty%d", c->lxc_conf->ttydir, i);
 		if (ret >= sizeof(path))
 			goto out;
 
-		if (fstat(path, &sb))
-			goto out;
-
-		fprintf(out, "tty%d:%d", i, minor(sb.st_dev));
+		fprintf(out, "newpts:%s\n", path);
 	}
 
-	ret = snprintf(path, PATH_MAX, c->lxcpath, "dev/console");
-	if (ret >= sizeof(path))
-		goto out:
-
-	if (fstat(path, &sb))
-		goto out;
-
-	fprintf(out, "console:%d", minor(sb.st_dev));
 	has_error = false;
-
 out:
 	fclose(out);
 	return !has_error;
@@ -3897,7 +3884,7 @@ out_unlock:
 	return !error;
 }
 
-static bool restore_tty_info(struct lxc_container *c, char *directory)
+static bool restore_tty_info(struct lxc_container *c, struct lxc_handler *handler, char *directory)
 {
 	bool has_error = true;
 	FILE *in;
@@ -3912,18 +3899,44 @@ static bool restore_tty_info(struct lxc_container *c, char *directory)
 	if (!in)
 		return false;
 
-	while (fscanf(in, "tty%d:%d", &ttyno, &hostminor)) {
-		ret = snprintf(path, PATH_MAX, "%s/dev/%s/tty%d", c->lxcpath, c->lxc_conf->ttydir, ttyno);
-		if (ret >= sizeof(path))
-			goto out;
+	if (container_mem_lock(c))
+		goto out_ul;
 
-		if (mount(
+	ttyno = 1;
+	while (1) {
+		int ret = fscanf(in, "newpts:%" PATH_MAX "s", path);
+		struct lxc_pty_info *pty_info = c->lxc_conf->tty_info->pty_info[i];
+
+		if (ret == EOF) {
+			/*
+			 * The checkpoint container had less ttys than this
+			 * one does, it will just be created normally.
+			 */
+			break;
+		} else if (ttyno > c->lxc_conf->tty) {
+			void *m;
+
+			WARN("more ttys in checkpoint than in current config, creating extra tty.");
+
+		} else {
+			/*
+			 * The checkpoint container had a tty with this index.
+			 * We should create it in the checkpoint container's
+			 * path instead of our current one, in case they are
+			 * different.
+			 */
+		}
+
+		ttyno++;
 	}
 
-	if (!fscanf(in, "console:%d", &hostminor))
-		goto out;
+	if (!setup_tty(c->lxc_conf->rootfs, c->lxc_conf->tty_info))
+		goto out_ul;
+
 
 	has_error = false;
+out_ul:
+	container_mem_unlock(c);
 out:
 	fclose(in);
 	return !has_error;
@@ -3990,7 +4003,7 @@ static bool lxcapi_restore(struct lxc_container *c, char *directory, bool verbos
 			}
 		}
 
-		if (restore_tty_info(c, directory))
+		if (restore_tty_info(c, handler, directory))
 			exit(1);
 
 		os.action = "restore";
