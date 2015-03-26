@@ -2040,18 +2040,16 @@ static int setup_mount(const struct lxc_rootfs *rootfs, const char *fstab,
 	return ret;
 }
 
-static int setup_mount_entries(const struct lxc_rootfs *rootfs, struct lxc_list *mount,
-	const char *lxc_name)
+FILE *write_mount_file(struct lxc_list *mount)
 {
 	FILE *file;
 	struct lxc_list *iterator;
 	char *mount_entry;
-	int ret;
 
 	file = tmpfile();
 	if (!file) {
 		ERROR("tmpfile error: %m");
-		return -1;
+		return NULL;
 	}
 
 	lxc_list_for_each(iterator, mount) {
@@ -2060,6 +2058,18 @@ static int setup_mount_entries(const struct lxc_rootfs *rootfs, struct lxc_list 
 	}
 
 	rewind(file);
+	return file;
+}
+
+static int setup_mount_entries(const struct lxc_rootfs *rootfs, struct lxc_list *mount,
+	const char *lxc_name)
+{
+	FILE *file;
+	int ret;
+
+	file = write_mount_file(mount);
+	if (!file)
+		return -1;
 
 	ret = mount_file_entries(rootfs, file, lxc_name);
 
