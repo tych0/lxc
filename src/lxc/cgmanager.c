@@ -1396,5 +1396,6 @@ static struct cgroup_ops cgmanager_ops = {
 	.mount_cgroup = cgm_mount_cgroup,
 	.nrtasks = cgm_get_nrtasks,
 	.disconnect = NULL,
+	.driver = CGMANAGER,
 };
 #endif
