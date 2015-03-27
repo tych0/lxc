@@ -3505,6 +3505,9 @@ struct criu_opts {
 	/* Enable criu verbose mode? */
 	bool verbose;
 
+	/* is this container using lxcfs? */
+	bool has_lxcfs;
+
 	/* dump: stop the container or not after dumping? */
 	bool stop;
 
@@ -3512,6 +3515,117 @@ struct criu_opts {
 	char *pidfile;
 	const char *cgroup_path;
 };
+
+/*
+ * Try to detect whether the container is using lxcfs by looking for
+ * /var/lib/lxcfs
+ */
+static bool using_lxcfs(struct lxc_container *c)
+{
+	char buf[PATH_MAX];
+	int n;
+
+	n = snprintf(buf, sizeof(buf), "%s/var/lib/lxcfs", c->lxc_conf->rootfs.path);
+	if (n < 0 || n >= sizeof(buf)) {
+		ERROR("Error detecting lxcfs");
+		return false;
+	}
+
+	return access(buf, F_OK) < 0;
+}
+
+// These are the lxcfs paths that are not cgroups. Those paths are built by
+// parsing the host's /proc/cgroup and rendering the co-mounted cgroups
+// accordingly.
+// FIXME: these should be drawn from /var/lib/lxcfs/proc as they are in the
+// lxcfs mount hook.
+static char *lxcfs_paths[] = {
+	"/proc/cpuinfo",
+	"/proc/meminfo",
+	"/proc/stat",
+	"/proc/uptime",
+	NULL,
+};
+
+struct cg_ent {
+	int heirarchy;
+	char name[1024];
+};
+
+static struct cg_ent **host_cgroups()
+{
+	FILE *f;
+	struct cg_ent **cgroups = NULL;
+
+	f = fopen("/proc/cgroups", "r");
+	if (!f)
+		return NULL;
+
+	/* skip the header */
+	if (0 != fscanf(f, "%*s %*s %*s %*s"))
+		goto err;
+
+	while (1) {
+		struct cg_ent *ent = malloc(sizeof(struct cg_ent));
+		if (!ent)
+			goto err;
+
+		if (fscanf(f, "%1024s %d %*[^\n]", ent->name, &ent->heirarchy) != 2) {
+			free(ent);
+			break;
+		}
+
+		if (!cgroups) {
+			cgroups = malloc(sizeof(struct ent *) * 2);
+			if (!cgroups) {
+				free(ent);
+				goto err;
+			}
+
+			cgroups[0] = ent;
+			cgroups[1] = NULL;
+		} else {
+			int i;
+			bool found = false;
+
+			for (i = 0; cgroups[i]; i++) {
+				if (ent->heirarchy == cgroups[i]->heirarchy) {
+					found = true;
+					strncat(cgroups[i]->name, ",", sizeof(cgroups[i]->name));
+					strncat(cgroups[i]->name, ent->name, sizeof(cgroups[i]->name));
+					free(ent);
+					break;
+				}
+			}
+
+			if (!found) {
+				void *m = realloc(cgroups, sizeof(struct ent *) * (i + 2));
+				if (!m) {
+					free(ent);
+					goto err;
+				}
+				cgroups = m;
+
+				cgroups[i] = ent;
+				cgroups[i+1] = NULL;
+			}
+		}
+	}
+
+	goto out;
+err:
+	if (cgroups) {
+		int i;
+
+		for (i = 0; cgroups[i]; i++)
+			free(cgroups[i]);
+
+		free(cgroups);
+	}
+out:
+	fclose(f);
+	return cgroups;
+}
 
 static void exec_criu(struct criu_opts *opts)
 {
@@ -3521,7 +3635,7 @@ static void exec_criu(struct criu_opts *opts)
 	struct lxc_list *it;
 
 	struct mntent mntent;
-	char buf[4096];
+	char buf[PATH_MAX];
 	FILE *mnts = NULL;
 
 	/* The command line always looks like:
@@ -3698,6 +3812,79 @@ static void exec_criu(struct criu_opts *opts)
 	}
 	fclose(mnts);
 
+	if (opts->has_lxcfs) {
+		char *key, *val;
+		char name[PATH_MAX];
+		struct cg_ent **cgroups = NULL;
+		int extra_mounts = 0;
+
+		// FIXME: free cgroups
+		cgroups = host_cgroups();
+		if (!cgroups)
+			goto err;
+
+		for (i = 0; lxcfs_paths[i]; i++)
+			;
+		extra_mounts += i;
+
+		for (i = 0; cgroups[i]; i++)
+			;
+		// systemd cgroup isn't listed in /proc/cgroups
+		extra_mounts += i + 1;
+
+		RESIZE_ARGS(extra_mounts * 2);
+
+		for (i = 0; lxcfs_paths[i]; i++) {
+
+			ret = snprintf(name, sizeof(name), "lxcfs/%s", lxcfs_paths[i]);
+			if (ret < 0 || ret >= sizeof(name))
+				goto err;
+
+			if (strcmp(opts->action, "dump") == 0) {
+				key = lxcfs_paths[i];
+				val = name;
+			} else {
+				key = name;
+				val = lxcfs_paths[i];
+			}
+
+			ret = snprintf(buf, sizeof(buf), "%s:%s", key, val);
+			if (ret < 0 || ret >= sizeof(buf))
+				goto err;
+
+			DECLARE_ARG("--ext-mount-map");
+			DECLARE_ARG(buf);
+		}
+
+		for (i = 0; cgroups[i]; i++) {
+			ret = snprintf(name, sizeof(name), "/sys/fs/cgroup/%s", cgroups[i]->name);
+			if (ret < 0 || ret >= sizeof(name))
+				goto err;
+
+			if (strcmp(opts->action, "dump") == 0) {
+				key = name;
+				val = cgroups[i]->name;
+			} else {
+				key = cgroups[i]->name;
+				val = name;
+			}
+
+			ret = snprintf(buf, sizeof(buf), "%s:%s", key, val);
+			if (ret < 0 || ret >= sizeof(buf))
+				goto err;
+
+			DECLARE_ARG("--ext-mount-map");
+			DECLARE_ARG(buf);
+		}
+
+		ret = snprintf(buf, sizeof(buf), "/sys/fs/cgroup/systemd:/sys/fs/cgroup/systemd");
+		if (ret < 0 || ret >= sizeof(buf))
+			goto err;
+
+		DECLARE_ARG("--ext-mount-map");
+		DECLARE_ARG(buf);
+	}
+
 	argv[argc] = NULL;
 
 	netnr = 0;
@@ -3872,6 +4059,21 @@ static bool lxcapi_checkpoint(struct lxc_container *c, char *directory, bool sto
 		os.c = c;
 		os.stop = stop;
 		os.verbose = verbose;
+		os.has_lxcfs = using_lxcfs(c);
+
+		if (os.has_lxcfs) {
+			char path[PATH_MAX];
+			int ret;
+
+			ret = snprintf(path, sizeof(path), "%s/lxcfs", directory);
+			if (ret < 0 || ret >= sizeof(path))
+				exit(1);
+
+			ret = open(path, O_WRONLY | O_CREAT, S_IRUSR | S_IRGRP);
+			if (ret < 0)
+				exit(1);
+			close(ret);
+		}
 
 		/* exec_criu() returning is an error */
 		exec_criu(&os);
@@ -3955,6 +4157,14 @@ static void do_restore(struct lxc_container *c, int pipe, char *directory, bool 
 	if (pid == 0) {
 		struct criu_opts os;
 		struct lxc_rootfs *rootfs;
+		char path[PATH_MAX];
+		int ret;
+
+		ret = snprintf(path, sizeof(path), "%s/lxcfs", directory);
+		if (ret < 0 || ret >= sizeof(path))
+			goto out_fini_handler;
+
+		os.has_lxcfs = access(path, F_OK) == 0;
 
 		if (unshare(CLONE_NEWNS))
 			goto out_fini_handler;
