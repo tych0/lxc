@@ -3704,7 +3704,7 @@ struct criu_opts {
 static void exec_criu(struct criu_opts *opts)
 {
 	char **argv, log[PATH_MAX];
-	int static_args = 14, argc = 0, i, ret;
+	int static_args = 18, argc = 0, i, ret;
 	int netnr = 0;
 	struct lxc_list *it;
 
@@ -3715,7 +3715,8 @@ static void exec_criu(struct criu_opts *opts)
 	/* The command line always looks like:
 	 * criu $(action) --tcp-established --file-locks --link-remap --force-irmap \
 	 * --manage-cgroups action-script foo.sh -D $(directory) \
-	 * -o $(directory)/$(action).log
+	 * -o $(directory)/$(action).log --enable-external-masters \
+	 * --enable-external-sharing --ext-mount-map auto
 	 * +1 for final NULL */
 
 	if (strcmp(opts->action, "dump") == 0) {
@@ -3776,6 +3777,10 @@ static void exec_criu(struct criu_opts *opts)
 	DECLARE_ARG("--link-remap");
 	DECLARE_ARG("--force-irmap");
 	DECLARE_ARG("--manage-cgroups");
+	DECLARE_ARG("--ext-mount-map");
+	DECLARE_ARG("auto");
+	DECLARE_ARG("--enable-external-masters");
+	DECLARE_ARG("--enable-external-sharing");
 	DECLARE_ARG("--action-script");
 	DECLARE_ARG(DATADIR "/lxc/lxc-restore-net");
 	DECLARE_ARG("-D");
@@ -4158,6 +4163,10 @@ static void do_restore(struct lxc_container *c, int pipe, char *directory, bool 
 
 		if (unshare(CLONE_NEWNS))
 			goto out_fini_handler;
+
+		if (mount(NULL, "/", NULL, MS_PRIVATE, 0)) {
+			goto out_fini_handler;
+		}
 
 		/* CRIU needs the lxc root bind mounted so that it is the root of some
 		 * mount. */
