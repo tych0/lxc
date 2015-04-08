@@ -189,8 +189,3 @@ void cgroup_disconnect(void)
 	if (ops && ops->disconnect)
 		ops->disconnect();
 }
-
-cgroup_driver_t cgroup_driver(void)
-{
-	return ops->driver;
-}
