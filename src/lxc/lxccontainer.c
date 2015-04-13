@@ -4128,12 +4128,30 @@ out_unlock:
 static void do_restore(struct lxc_container *c, int pipe, char *directory, bool verbose)
 {
 	pid_t pid;
-	char pidfile[L_tmpnam];
+	char pidfile[sizeof(P_tmpdir) + 25];
 	struct lxc_handler *handler;
-	int status;
+	int status, ret;
 
-	if (!tmpnam(pidfile))
+	ret = snprintf(pidfile, sizeof(pidfile), "%s/lxc_criu_pidfile.XXXXXX", P_tmpdir);
+	if (ret < 0 || ret >= sizeof(pidfile))
 		goto out;
+
+	/*
+	 * Here, we simply use mkstemp to acquire a secure tmpfile name. CRIU
+	 * tries to create the pidfile with O_CREAT | O_EXCL, so we need to
+	 * remove it before calling criu.
+	 */
+	ret = mkstemp(pidfile);
+	if (ret < 0) {
+		SYSERROR("failed to create pidfile");
+		goto out;
+	}
+
+	close(ret);
+	if (remove(pidfile) < 0) {
+		SYSERROR("failed to remove pidfile");
+		goto out;
+	}
 
 	handler = lxc_init(c->name, c->lxc_conf, c->config_path);
 	if (!handler)
@@ -4231,6 +4249,12 @@ static void do_restore(struct lxc_container *c, int pipe, char *directory, bool 
 
 				ret = fscanf(f, "%d", (int*) &handler->pid);
 				fclose(f);
+
+				if (remove(pidfile) < 0) {
+					SYSERROR("failed to remove pidfile");
+					goto out_fini_handler;
+				}
+
 				if (ret != 1) {
 					ERROR("reading restore pid failed");
 					goto out_fini_handler;
