@@ -2053,15 +2053,29 @@ static int setup_mount(const struct lxc_rootfs *rootfs, const char *fstab,
 
 FILE *write_mount_file(struct lxc_list *mount)
 {
+	int fd, ret;
 	FILE *file;
 	struct lxc_list *iterator;
-	char *mount_entry;
+	char *mount_entry, template[sizeof(P_tmpdir) + 23];
 
-	file = tmpfile();
-	if (!file) {
-		ERROR("tmpfile error: %m");
+	ret = snprintf(template, sizeof(template), "%s/lxc_mount_file.XXXXXX", P_tmpdir);
+	if (ret < 0 || ret >= sizeof(template))
+		return NULL;
+
+	fd = mkstemp(template);
+	if (fd < 0) {
+		SYSERROR("mkstemp error");
 		return NULL;
 	}
+
+	if (unlink(template)) {
+		SYSERROR("unlink failed");
+		return NULL;
+	}
+
+	file = fdopen(fd, "r+");
+	if (!file)
+		return NULL;
 
 	lxc_list_for_each(iterator, mount) {
 		mount_entry = iterator->elem;
