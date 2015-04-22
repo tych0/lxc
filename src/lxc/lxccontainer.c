@@ -3687,8 +3687,13 @@ static bool do_lxcapi_checkpoint(struct lxc_container *c, char *directory, bool 
 	if (!criu_ok(c))
 		return false;
 
-	if (mkdir(directory, 0700) < 0 && errno != EEXIST)
+	if (mkdir(directory, 0700) < 0) {
+		if (errno == EEXIST)
+			ERROR("please use a new directory for criu state");
+		else
+			SYSERROR("mkdir failed");
 		return false;
+	}
 
 	if (!dump_net_info(c, directory))
 		return false;
