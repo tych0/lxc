@@ -6,7 +6,8 @@ set -e
 
 FAIL() {
 	echo -n "Failed " >&2
-	echo "$*" >&2
+	echo "$1" >&2
+	lxc-destroy -n $2 || true
 	exit 1
 }
 
@@ -27,7 +28,9 @@ if verlte "$criu_version" "1.3.1"; then
 fi
 
 name=lxc-test-criu
-lxc-create -t ubuntu -n $name || FAIL "creating container"
+# try to clean up after ourselves if a previous test failed
+lxc-destroy -n $name || true
+lxc-create -t ubuntu -n $name || FAIL "creating container" $name
 
 cat >> "$(lxc-config lxc.lxcpath)/$name/config" <<EOF
 # hax for criu
@@ -36,17 +39,17 @@ lxc.tty = 0
 lxc.cgroup.devices.deny = c 5:1 rwm
 EOF
 
-lxc-start -n $name -d || FAIL "starting container"
-lxc-wait -n $name -s RUNNING || FAIL "waiting for container to run"
+lxc-start -n $name -d || FAIL "starting container" $name
+lxc-wait -n $name -s RUNNING || FAIL "waiting for container to run" $name
 
 # Let the container boot and get into a steady state.
 sleep 5s
 
 # The first time this usually fails because CRIU cannot checkpoint things with
 # data on a socket.
-lxc-checkpoint -n $name -v -s -D /tmp/checkpoint || FAIL "failed checkpointing"
+lxc-checkpoint -n $name -v -s -D /tmp/checkpoint || FAIL "failed checkpointing" $name
 lxc-wait -n $name -s STOPPED
-lxc-checkpoint -n $name -v -r -D /tmp/checkpoint || FAIL "failed restoring"
+lxc-checkpoint -n $name -v -r -D /tmp/checkpoint || FAIL "failed restoring" $name
 
 lxc-stop -n $name -t 1
 lxc-destroy -f -n $name
