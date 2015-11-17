@@ -47,14 +47,97 @@
 
 lxc_log_define(lxc_criu, lxc);
 
+#define CGMANAGER_SOCK "/sys/fs/cgroup/cgmanager/sock"
+int find_cgm_inodes(pid_t init, char **ino_arg)
+{
+	int ret = -1, rootns;
+	FILE *f;
+
+	/* We're interested in the inodes for the connections to the cgmanager
+	 * socket from the inside of the container, which means they are in the
+	 * container's /proc/net/unix; we setns there to look.
+	 */
+	rootns = open("/proc/self/ns/net", O_RDONLY);
+	if (rootns < 0) {
+		SYSERROR("opening own namespace");
+		return -1;
+	}
+
+	if (!switch_to_ns(init, "net"))
+		goto out;
+
+	f = fopen("/proc/net/unix", "r");
+	if (!f) {
+		SYSERROR("opening /proc/net/unix");
+		goto out_ns;
+	}
+
+	/* skip the header line */
+	while(!feof(f) && fgetc(f) != '\n')
+		;
+
+	while(1) {
+		int scanned;
+		char path[PATH_MAX], *tmp;
+		ino_t inode;
+
+		scanned = fscanf(f, "%*x: %*x %*d %*d %*d %*d %lu", &inode);
+		if (scanned != 1) {
+			if (feof(f))
+				break;
+			ERROR("problem scanning for members (%d)\n", scanned);
+			goto out_f;
+		}
+
+		/* no path means it's not what we're looking for */
+		if (!fgets(path, sizeof(path), f))
+			continue;
+
+		/* chop off the \n */
+		path[strlen(path) - 1] = 0;
+
+		/* start from after the delimiter */
+		if (strcmp(path + 1, CGMANAGER_SOCK))
+			continue;
+
+		if (!*ino_arg) {
+			if (asprintf(&tmp, "--ext-unix-sk=%lu", inode) < 0)
+				goto out_f;
+		} else {
+			if (asprintf(&tmp, "%s,%lu", *ino_arg, inode) < 0)
+				goto out_f;
+		}
+
+		*ino_arg = tmp;
+	}
+
+	ret = 0;
+
+out_f:
+	fclose(f);
+out_ns:
+	if (setns(rootns, 0) < 0) {
+		SYSERROR("error returning to init net ns");
+		ret = -1;
+	}
+out:
+	close(rootns);
+	return ret;
+}
+
 void exec_criu(struct criu_opts *opts)
 {
 	char **argv, log[PATH_MAX];
 	int static_args = 22, argc = 0, i, ret;
 	int netnr = 0;
 	struct lxc_list *it;
+	char *cgm_ino_arg = NULL;
 
 	char buf[4096];
+	pid_t init = opts->c->init_pid(opts->c);
+
+	if (init < 0)
+		return;
 
 	/* The command line always looks like:
 	 * criu $(action) --tcp-established --file-locks --link-remap --force-irmap \
@@ -71,6 +154,14 @@ void exec_criu(struct criu_opts *opts)
 		/* --leave-running */
 		if (!opts->stop)
 			static_args++;
+
+		ret = find_cgm_inodes(init, &cgm_ino_arg);
+		if (ret < 0)
+			return;
+
+		if (cgm_ino_arg != NULL)
+			static_args++;
+
 	} else if (strcmp(opts->action, "restore") == 0) {
 		/* --root $(lxc_mount_point) --restore-detached
 		 * --restore-sibling --pidfile $foo --cgroup-root $foo */
@@ -136,7 +227,7 @@ void exec_criu(struct criu_opts *opts)
 	if (strcmp(opts->action, "dump") == 0) {
 		char pid[32], *freezer_relative;
 
-		if (sprintf(pid, "%d", opts->c->init_pid(opts->c)) < 0)
+		if (sprintf(pid, "%d", init) < 0)
 			goto err;
 
 
@@ -160,6 +251,10 @@ void exec_criu(struct criu_opts *opts)
 
 		if (!opts->stop)
 			DECLARE_ARG("--leave-running");
+
+		if (cgm_ino_arg)
+			argv[argc++] = cgm_ino_arg;
+
 	} else if (strcmp(opts->action, "restore") == 0) {
 		void *m;
 		int additional;
