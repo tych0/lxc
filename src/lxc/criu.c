@@ -378,11 +378,6 @@ bool criu_ok(struct lxc_container *c)
 		}
 	}
 
-	if (c->lxc_conf->tty != 0) {
-		ERROR("lxc.tty must be 0\n");
-		return false;
-	}
-
 	return true;
 }
 
