@@ -32,6 +32,12 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#if IS_BIONIC
+#include <../include/lxcmntent.h>
+#else
+#include <mntent.h>
+#endif
+
 #include "config.h"
 
 #include "bdev/bdev.h"
@@ -53,6 +59,8 @@ void exec_criu(struct criu_opts *opts)
 	int static_args = 22, argc = 0, i, ret;
 	int netnr = 0;
 	struct lxc_list *it;
+	FILE *mnts;
+	struct mntent mntent;
 
 	char buf[4096];
 
@@ -99,6 +107,8 @@ void exec_criu(struct criu_opts *opts)
 
 	if (opts->verbose)
 		static_args++;
+
+	static_args += lxc_list_len(&opts->c->lxc_conf->mount_list) * 2;
 
 	ret = snprintf(log, PATH_MAX, "%s/%s.log", opts->directory, opts->action);
 	if (ret < 0 || ret >= PATH_MAX) {
@@ -150,6 +160,33 @@ void exec_criu(struct criu_opts *opts)
 
 	if (opts->verbose)
 		DECLARE_ARG("-vvvvvv");
+
+	mnts = write_mount_file(&opts->c->lxc_conf->mount_list);
+	if (!mnts)
+		goto err;
+
+	while (getmntent_r(mnts, &mntent, buf, sizeof(buf))) {
+		char arg[2048], *key, *val;
+		int ret;
+
+		if (strcmp(opts->action, "dump") == 0) {
+			key = mntent.mnt_dir;
+			val = mntent.mnt_fsname;
+		} else {
+			key = mntent.mnt_fsname;
+			val = mntent.mnt_dir;
+		}
+
+		ret = snprintf(arg, sizeof(arg), "%s:/%s", key, val);
+		if (ret < 0 || ret >= sizeof(arg)) {
+			fclose(mnts);
+			goto err;
+		}
+
+		DECLARE_ARG("--ext-mount-map");
+		DECLARE_ARG(arg);
+	}
+	fclose(mnts);
 
 	if (strcmp(opts->action, "dump") == 0 || strcmp(opts->action, "pre-dump") == 0) {
 		char pid[32], *freezer_relative;
@@ -212,6 +249,7 @@ void exec_criu(struct criu_opts *opts)
 		}
 
 		additional = lxc_list_len(&opts->c->lxc_conf->network) * 2;
+		additional += lxc_list_len(&opts->c->lxc_conf->mount_list) * 2;
 
 		m = realloc(argv, (argc + additional + 1) * sizeof(*argv));
 		if (!m)
@@ -244,7 +282,6 @@ void exec_criu(struct criu_opts *opts)
 			DECLARE_ARG("--veth-pair");
 			DECLARE_ARG(buf);
 		}
-
 	}
 
 	argv[argc] = NULL;
