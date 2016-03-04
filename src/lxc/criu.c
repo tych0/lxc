@@ -355,7 +355,6 @@ version_error:
 bool criu_ok(struct lxc_container *c)
 {
 	struct lxc_list *it;
-	bool found_deny_rule = false;
 
 	if (!criu_version_ok())
 		return false;
@@ -377,33 +376,6 @@ bool criu_ok(struct lxc_container *c)
 			ERROR("Found network that is not VETH or NONE\n");
 			return false;
 		}
-	}
-
-	// These requirements come from http://criu.org/LXC
-	if (c->lxc_conf->console.path &&
-			strcmp(c->lxc_conf->console.path, "none") != 0) {
-		ERROR("lxc.console must be none\n");
-		return false;
-	}
-
-	if (c->lxc_conf->tty != 0) {
-		ERROR("lxc.tty must be 0\n");
-		return false;
-	}
-
-	lxc_list_for_each(it, &c->lxc_conf->cgroup) {
-		struct lxc_cgroup *cg = it->elem;
-		if (strcmp(cg->subsystem, "devices.deny") == 0 &&
-				strcmp(cg->value, "c 5:1 rwm") == 0) {
-
-			found_deny_rule = true;
-			break;
-		}
-	}
-
-	if (!found_deny_rule) {
-		ERROR("couldn't find devices.deny = c 5:1 rwm");
-		return false;
 	}
 
 	return true;
