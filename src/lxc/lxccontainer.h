@@ -885,8 +885,8 @@ struct migrate_opts {
 	char *pageserver_address; /* where should memory pages be send? */
 	char *pageserver_port;
 
-	/* On dump should we leave the container in the FROZEN state? this
-	 * conflicts with stop=true.
+	/* Whether or not to leave the containers in a FROZEN state after a
+	 * successful dump. This conflicts with stop=true.
 	 */
 	bool leave_frozen;
 };
