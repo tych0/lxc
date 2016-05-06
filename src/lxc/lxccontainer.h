@@ -891,6 +891,11 @@ struct migrate_opts {
 	 * won't if e.g. you rsync the filesystems between two machines.
 	 */
 	bool preserves_inodes;
+
+	/* Whether or not to leave the containers in a FROZEN state after a
+	 * successful dump. This conflicts with stop=true.
+	 */
+	bool leave_frozen;
 };
 
 /*!

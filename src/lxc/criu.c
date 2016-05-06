@@ -45,10 +45,10 @@
 #include "network.h"
 #include "utils.h"
 
-#define CRIU_VERSION 		"2.0"
+#define CRIU_VERSION 		"2.2"
 
-#define CRIU_GITID_VERSION	"2.0"
-#define CRIU_GITID_PATCHLEVEL	0
+#define CRIU_GITID_VERSION	"2.1"
+#define CRIU_GITID_PATCHLEVEL	41
 
 lxc_log_define(lxc_criu, lxc);
 
@@ -153,8 +153,8 @@ static void exec_criu(struct criu_opts *opts)
 		if (opts->user->pageserver_address && opts->user->pageserver_port)
 			static_args += 5;
 
-		/* --leave-running (only for final dump) */
-		if (strcmp(opts->action, "dump") == 0 && !opts->user->stop)
+		/* --leave-running or --leave-frozen (only for final dump) */
+		if (strcmp(opts->action, "dump") == 0 && (!opts->user->stop || opts->user->leave_frozen))
 			static_args++;
 
 		/* --external tty[88,4] */
@@ -284,8 +284,13 @@ static void exec_criu(struct criu_opts *opts)
 			DECLARE_ARG("--force-irmap");
 
 		/* only for final dump */
-		if (strcmp(opts->action, "dump") == 0 && !opts->user->stop)
-			DECLARE_ARG("--leave-running");
+		if (strcmp(opts->action, "dump") == 0) {
+			if(opts->user->leave_frozen)
+				DECLARE_ARG("--leave-frozen");
+			else if (!opts->user->stop)
+				DECLARE_ARG("--leave-running");
+		}
+
 	} else if (strcmp(opts->action, "restore") == 0) {
 		void *m;
 		int additional;
@@ -826,6 +831,11 @@ static int save_tty_major_minor(char *directory, struct lxc_container *c, char *
 static bool do_dump(struct lxc_container *c, char *mode, struct migrate_opts *opts)
 {
 	pid_t pid;
+
+	if (opts->stop && opts->leave_frozen) {
+		ERROR("stop and leave_frozen conflict");
+		return false;
+	}
 
 	if (!criu_ok(c))
 		return false;
