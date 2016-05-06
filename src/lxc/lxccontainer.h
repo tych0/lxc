@@ -884,6 +884,11 @@ struct migrate_opts {
 	char *predump_dir; /* relative to directory above */
 	char *pageserver_address; /* where should memory pages be send? */
 	char *pageserver_port;
+
+	/* On dump should we leave the container in the FROZEN state? this
+	 * conflicts with stop=true.
+	 */
+	bool leave_frozen;
 };
 
 /*!
