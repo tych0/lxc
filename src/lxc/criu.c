@@ -615,6 +615,7 @@ static bool criu_ok(struct lxc_container *c, char **criu_version)
 		case LXC_NET_VETH:
 		case LXC_NET_NONE:
 		case LXC_NET_EMPTY:
+		case LXC_NET_MACVLAN:
 			break;
 		default:
 			ERROR("Found network that is not VETH or NONE\n");
