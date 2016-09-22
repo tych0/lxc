@@ -438,27 +438,55 @@ static void exec_criu(struct criu_opts *opts)
 		lxc_list_for_each(it, &opts->c->lxc_conf->network) {
 			char eth[128], *veth;
 			struct lxc_netdev *n = it->elem;
+			char *arg = NULL;
 
-			if (n->type != LXC_NET_VETH)
-				continue;
+			switch (n->type) {
+			case LXC_NET_VETH:
+				if (n->name) {
+					if (strlen(n->name) >= sizeof(eth))
+						goto err;
+					strncpy(eth, n->name, sizeof(eth));
+				} else
+					sprintf(eth, "eth%d", netnr);
 
-			if (n->name) {
-				if (strlen(n->name) >= sizeof(eth))
+				veth = n->priv.veth_attr.pair;
+
+				if (n->link)
+					ret = snprintf(buf, sizeof(buf), "%s=%s@%s", eth, veth, n->link);
+				else
+					ret = snprintf(buf, sizeof(buf), "%s=%s", eth, veth);
+				if (ret < 0 || ret >= sizeof(buf))
 					goto err;
-				strncpy(eth, n->name, sizeof(eth));
-			} else
-				sprintf(eth, "eth%d", netnr);
+				arg = "--veth-pair";
+				break;
+			case LXC_NET_MACVLAN:
+				if (n->name) {
+					if (strlen(n->name) >= sizeof(eth))
+						goto err;
+					strncpy(eth, n->name, sizeof(eth));
+				} else
+					sprintf(eth, "eth%d", netnr);
 
-			veth = n->priv.veth_attr.pair;
+				if (!n->link) {
+					ERROR("no host interface for macvlan %s\n", n->name);
+					goto err;
+				}
 
-			if (n->link)
-				ret = snprintf(buf, sizeof(buf), "%s=%s@%s", eth, veth, n->link);
-			else
-				ret = snprintf(buf, sizeof(buf), "%s=%s", eth, veth);
-			if (ret < 0 || ret >= sizeof(buf))
+				ret = snprintf(buf, sizeof(buf), "%s=%s", eth, n->link);
+				if (ret < 0 || ret >= sizeof(buf))
+					goto err;
+				arg = "--macvlan-pair";
+				break;
+			case LXC_NET_NONE:
+			case LXC_NET_EMPTY:
+				break;
+			default:
+				/* we have screened for this earlier... */
+				ERROR("unexpected network type %d\n", n->type);
 				goto err;
+			}
 
-			DECLARE_ARG("--veth-pair");
+			DECLARE_ARG(arg);
 			DECLARE_ARG(buf);
 		}
 
@@ -615,9 +643,10 @@ static bool criu_ok(struct lxc_container *c, char **criu_version)
 		case LXC_NET_VETH:
 		case LXC_NET_NONE:
 		case LXC_NET_EMPTY:
+		case LXC_NET_MACVLAN:
 			break;
 		default:
-			ERROR("Found network that is not VETH or NONE\n");
+			ERROR("Found un-dumpable network: %s (%s)\n", lxc_net_type_to_str(n->type), n->name);
 			return false;
 		}
 	}
