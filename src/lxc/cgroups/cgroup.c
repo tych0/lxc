@@ -59,6 +59,8 @@ bool cgroup_init(struct lxc_handler *handler)
 	if (ops) {
 		INFO("cgroup driver %s initing for %s", ops->driver, handler->name);
 		handler->cgroup_data = ops->init(handler);
+	} else {
+		ERROR("cgroup ops not initialized; do you own your cgroups?");
 	}
 
 	return handler->cgroup_data != NULL;
