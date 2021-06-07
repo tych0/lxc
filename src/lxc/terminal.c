@@ -866,36 +866,42 @@ static int lxc_terminal_create_foreign(struct lxc_conf *conf, struct lxc_termina
 {
 	int ret;
 
+	ERROR("TYCHO: openpty");
 	ret = openpty(&terminal->ptx, &terminal->pty, NULL, NULL, NULL);
 	if (ret < 0) {
 		SYSERROR("Failed to open terminal");
 		return -1;
 	}
 
+	ERROR("TYCHO: terminal_map_ids");
 	ret = lxc_terminal_map_ids(conf, terminal);
 	if (ret < 0) {
 		SYSERROR("Failed to change ownership of terminal multiplexer device");
 		goto err;
 	}
 
+	ERROR("TYCHO: ttyname_r");
 	ret = ttyname_r(terminal->pty, terminal->name, sizeof(terminal->name));
 	if (ret < 0) {
 		SYSERROR("Failed to retrieve name of terminal pty");
 		goto err;
 	}
 
+	ERROR("TYCHO: fd_cloexec");
 	ret = fd_cloexec(terminal->ptx, true);
 	if (ret < 0) {
 		SYSERROR("Failed to set FD_CLOEXEC flag on terminal ptx");
 		goto err;
 	}
 
+	ERROR("TYCHO: fd_cloexec 2");
 	ret = fd_cloexec(terminal->pty, true);
 	if (ret < 0) {
 		SYSERROR("Failed to set FD_CLOEXEC flag on terminal pty");
 		goto err;
 	}
 
+	ERROR("TYCHO: terminal_peer_default");
 	ret = lxc_terminal_peer_default(terminal);
 	if (ret < 0) {
 		ERROR("Failed to allocate proxy terminal");
