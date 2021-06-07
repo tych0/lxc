@@ -866,8 +866,8 @@ static int lxc_terminal_create_foreign(struct lxc_conf *conf, struct lxc_termina
 {
 	int ret;
 
-	ERROR("TYCHO: terminal: %p\n", terminal);
-	ERROR("TYCHO: ptx: %p, pty: %p\n", &terminal->proxy.ptx, &terminal->proxy.pty);
+	ERROR("TYCHO: terminal: %p", terminal);
+	ERROR("TYCHO: ptx: %p, pty: %p", &terminal->proxy.ptx, &terminal->proxy.pty);
 	ERROR("TYCHO: openpty");
 	ret = openpty(&terminal->ptx, &terminal->pty, NULL, NULL, NULL);
 	if (ret < 0) {
@@ -976,7 +976,7 @@ int lxc_terminal_setup(struct lxc_conf *conf)
 	int ret;
 	struct lxc_terminal *terminal = &conf->console;
 
-	ERROR("TYCHO: hello world");
+	ERROR("TYCHO: hello world %p", terminal->path);
 	if (terminal->path && strequal(terminal->path, "none"))
 		return log_info(0, "No terminal requested");
 
