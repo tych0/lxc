@@ -968,21 +968,26 @@ int lxc_terminal_setup(struct lxc_conf *conf)
 	int ret;
 	struct lxc_terminal *terminal = &conf->console;
 
+	ERROR("TYCHO: hello world");
 	if (terminal->path && strequal(terminal->path, "none"))
 		return log_info(0, "No terminal requested");
 
+	ERROR("TYCHO: terminal_create_foreign");
 	ret = lxc_terminal_create_foreign(conf, terminal);
 	if (ret < 0)
 		return -1;
 
+	ERROR("TYCHO: create_log_file");
 	ret = lxc_terminal_create_log_file(terminal);
 	if (ret < 0)
 		goto err;
 
+	ERROR("TYCHO: create_ringbuf");
 	ret = lxc_terminal_create_ringbuf(terminal);
 	if (ret < 0)
 		goto err;
 
+	ERROR("TYCHO: terminal setup done");
 	return 0;
 
 err:
