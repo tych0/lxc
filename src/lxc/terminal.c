@@ -531,6 +531,8 @@ static int lxc_terminal_peer_proxy_alloc(struct lxc_terminal *terminal,
 	/* This is the proxy terminal that will be given to the client, and
 	 * that the real terminal ptx will send to / recv from.
 	 */
+	ERROR("TYCHO: terminal: %p\n", terminal);
+	ERROR("TYCHO: ptx: %p, pty: %p\n", &terminal->proxy.ptx, &terminal->proxy.pty);
 	ret = openpty(&terminal->proxy.ptx, &terminal->proxy.pty, NULL,
 		      NULL, NULL);
 	if (ret < 0) {
