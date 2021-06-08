@@ -870,6 +870,7 @@ static int lxc_terminal_create_foreign(struct lxc_conf *conf, struct lxc_termina
 	ERROR("TYCHO: ptx: %p, pty: %p", &terminal->proxy.ptx, &terminal->proxy.pty);
 	ERROR("TYCHO: openpty");
 	ret = openpty(&terminal->ptx, &terminal->pty, NULL, NULL, NULL);
+	ERROR("TYCHO: openpty done %d", ret);
 	if (ret < 0) {
 		SYSERROR("Failed to open terminal");
 		return -1;
