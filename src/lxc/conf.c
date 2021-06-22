@@ -2594,7 +2594,7 @@ static int mount_file_entries(struct lxc_rootfs *rootfs, FILE *file,
 	if (!feof(file) || ferror(file))
 		return log_error(-1, "Failed to parse mount entries");
 
-	ERROR("TYCHO: mount_file_entries() ok\n");
+	ERROR("TYCHO: mount_file_entries() ok %ld", ftell(file));
 
 	return 0;
 }
@@ -2697,6 +2697,7 @@ FILE *make_anonymous_mount_file(struct lxc_list *mount,
 	f = fdopen(fd, "re+");
 	if (f)
 		move_fd(fd); /* Transfer ownership of fd. */
+	TRACE("TYCHO wrote %ld bytes", ftell(f));
 	return f;
 }
 
