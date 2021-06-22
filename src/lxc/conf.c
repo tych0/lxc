@@ -2590,6 +2590,7 @@ static int mount_file_entries(struct lxc_rootfs *rootfs, FILE *file,
 			ERROR("failing mount_file_entries()");
 			return -1;
 		}
+		errno = 0;
 	}
 	SYSERROR("TYCHO: after getmntent_r");
 
