@@ -2572,7 +2572,7 @@ static int mount_file_entries(struct lxc_rootfs *rootfs, FILE *file,
 	char buf[PATH_MAX];
 	struct mntent mntent;
 
-	ERROR("TYCHO mount_file_entries()");
+	ERROR("TYCHO mount_file_entries() PATH_MAX: %d", PATH_MAX);
 	while (getmntent_r(file, &mntent, buf, sizeof(buf))) {
 		int ret;
 
@@ -2672,7 +2672,7 @@ FILE *make_anonymous_mount_file(struct lxc_list *mount,
 		mount_entry = iterator->elem;
 		len = strlen(mount_entry);
 
-		TRACE("TYCHO: mount_entry: %s", mount_entry);
+		TRACE("TYCHO: mount_entry: %s (%lu)", mount_entry, len);
 
 		ret = lxc_write_nointr(fd, mount_entry, len);
 		if (ret != len)

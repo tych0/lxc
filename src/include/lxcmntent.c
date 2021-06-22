@@ -82,8 +82,10 @@ struct mntent *getmntent_r(FILE *stream, struct mntent *mp, char *buffer, int bu
 	do {
 		char *end_ptr;
 
-		if (!fgets(buffer, bufsiz, stream))
+		if (!fgets(buffer, bufsiz, stream)) {
+			fprintf(stderr, "returning error from our getmntent_r implementation\n");
 			return NULL;
+		}
 
 		end_ptr = strchr(buffer, '\n');
 		if (end_ptr != NULL) {
