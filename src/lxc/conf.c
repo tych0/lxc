@@ -2572,9 +2572,11 @@ static int mount_file_entries(struct lxc_rootfs *rootfs, FILE *file,
 	char buf[PATH_MAX];
 	struct mntent mntent;
 
+	ERROR("TYCHO mount_file_entries()");
 	while (getmntent_r(file, &mntent, buf, sizeof(buf))) {
 		int ret;
 
+		TRACE("TYCHO mounting %s", mntent.mnt_dir);
 		if (!rootfs->path)
 			ret = mount_entry_on_systemfs(rootfs, &mntent);
 		else if (mntent.mnt_dir[0] != '/')
@@ -2644,6 +2646,8 @@ FILE *make_anonymous_mount_file(struct lxc_list *mount,
 	char *mount_entry;
 	struct lxc_list *iterator;
 
+	ERROR("TYCHO: make_anonymous_mount_file()");
+
 	fd = memfd_create(".lxc_mount_file", MFD_CLOEXEC);
 	if (fd < 0) {
 		char template[] = P_tmpdir "/.lxc_mount_file_XXXXXX";
@@ -2663,6 +2667,8 @@ FILE *make_anonymous_mount_file(struct lxc_list *mount,
 
 		mount_entry = iterator->elem;
 		len = strlen(mount_entry);
+
+		TRACE("TYCHO: mount_entry: %s", mount_entry);
 
 		ret = lxc_write_nointr(fd, mount_entry, len);
 		if (ret != len)
@@ -2712,6 +2718,8 @@ static int __lxc_idmapped_mounts_child(struct lxc_handler *handler, FILE *f)
 	char buf[PATH_MAX];
 	struct mntent mntent;
 
+	ERROR("__lxc_idmapped_mounts_child()");
+
 	while (getmntent_r(f, &mntent, buf, sizeof(buf))) {
 		__do_close int fd_from = -EBADF, fd_to = -EBADF,
 			       fd_userns = -EBADF;
@@ -2721,6 +2729,7 @@ static int __lxc_idmapped_mounts_child(struct lxc_handler *handler, FILE *f)
 		int dfd_from;
 		const char *source_relative, *target_relative;
 
+		TRACE("TYCHO: mounting %s", mntent.mnt_dir);
 		ret = parse_lxc_mount_attrs(&opts, mntent.mnt_opts);
 		if (ret < 0)
 			return syserror("Failed to parse LXC specific mount options");
