@@ -2585,12 +2585,16 @@ static int mount_file_entries(struct lxc_rootfs *rootfs, FILE *file,
 		else
 			ret = mount_entry_on_absolute_rootfs(&mntent, rootfs,
 							     lxc_name, lxc_path);
-		if (ret < 0)
+		if (ret < 0) {
+			ERROR("failing mount_file_entries()");
 			return -1;
+		}
 	}
 
 	if (!feof(file) || ferror(file))
 		return log_error(-1, "Failed to parse mount entries");
+
+	ERROR("TYCHO: mount_file_entries() ok\n");
 
 	return 0;
 }
@@ -2740,8 +2744,10 @@ static int __lxc_idmapped_mounts_child(struct lxc_handler *handler, FILE *f)
 			return syserror("Failed to parse mount options");
 
 		/* No idmapped mount entry so skip it. */
-		if (is_empty_string(opts.userns_path))
+		if (is_empty_string(opts.userns_path)) {
+			ERROR("skipping idmapped mount %s", mntent.mnt_dir);
 			continue;
+		}
 
 		if (!can_use_bind_mounts())
 			return syserror_set(-EINVAL, "Kernel does not support idmapped mounts");
