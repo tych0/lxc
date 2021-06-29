@@ -21,8 +21,13 @@
 #include "list.h"
 #include "lxcseccomp.h"
 #include "memory_utils.h"
+#include "namespace.h"
 #include "ringbuf.h"
 #include "start.h"
+#include "state.h"
+#include "storage/storage.h"
+#include "string_utils.h"
+#include "syscall_wrappers.h"
 #include "terminal.h"
 
 #if HAVE_SYS_RESOURCE_H
