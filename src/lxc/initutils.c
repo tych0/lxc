@@ -17,6 +17,7 @@
 #include "macro.h"
 #include "memory_utils.h"
 #include "process_utils.h"
+#include "syscall_wrappers.h"
 
 #ifndef HAVE_STRLCPY
 #include "include/strlcpy.h"
